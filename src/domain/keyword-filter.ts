@@ -6,7 +6,7 @@ export interface Keyword {
 function tokenize(text: string): string[] {
   return text
     .normalize("NFD")
-    .replace(/\p{M}/gu, "")
+    .replace(/[\p{M}\p{Cf}]/gu, "")
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)
     .filter((word) => word.length > 0);

@@ -2,6 +2,7 @@ import "dotenv/config";
 import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { watchOffers } from "./application/watch-offers.js";
 import { ConfigError, loadKeywordsConfig, parseAppEnv } from "./infrastructure/config.js";
+import { createConsoleLogger } from "./infrastructure/console-logger.js";
 import { connectAsUser } from "./infrastructure/telegram-client.js";
 import { TelegramBotNotifier } from "./infrastructure/telegram-notifier.js";
 import { TelegramSource } from "./infrastructure/telegram-source.js";
@@ -14,6 +15,7 @@ setDefaultAutoSelectFamilyAttemptTimeout(2000);
 async function main(): Promise<void> {
   const env = parseAppEnv(process.env);
   const config = await loadKeywordsConfig(KEYWORDS_PATH);
+  const logger = createConsoleLogger();
 
   const notifier = new TelegramBotNotifier(env.botToken, env.notifyChatId);
   try {
@@ -23,20 +25,22 @@ async function main(): Promise<void> {
   }
 
   const { client, me } = await connectAsUser(env, env.session);
-  console.info(`Conectado como @${me.username ?? me.firstName ?? "?"}`);
+  logger.info(`Conectado como @${me.username ?? me.firstName ?? "?"}`);
 
   const shutdown = async (signal: string): Promise<void> => {
-    console.info(`${signal} recebido, desconectando...`);
+    logger.info(`${signal} recebido, desconectando...`);
     await client.destroy();
     process.exit(0);
   };
   process.once("SIGINT", (signal) => void shutdown(signal));
   process.once("SIGTERM", (signal) => void shutdown(signal));
 
-  const source = new TelegramSource(client, config.channels, console);
-  await watchOffers({ source, notifier, keywords: config.keywords, logger: console });
+  const source = new TelegramSource(client, config.channels, logger, {
+    pollIntervalMs: env.pollIntervalSeconds * 1000,
+  });
+  await watchOffers({ source, notifier, keywords: config.keywords, logger });
 
-  console.info(`Pronto. ${config.keywords.length} palavra(s)-chave ativa(s).`);
+  logger.info(`Pronto. ${config.keywords.length} palavra(s)-chave ativa(s).`);
 }
 
 try {

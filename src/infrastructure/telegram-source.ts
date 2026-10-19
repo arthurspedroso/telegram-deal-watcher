@@ -1,8 +1,11 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { Api, type TelegramClient } from "telegram";
 import { NewMessage, type NewMessageEvent } from "telegram/events/index.js";
 import type { Logger, OfferHandler, OfferSource } from "../application/ports.js";
 import type { Offer } from "../domain/offer.js";
 import type { ChannelSelection } from "./config.js";
+
+const MAX_MESSAGES_PER_POLL = 100;
 
 export interface WatchedChannel {
   readonly id: string;
@@ -19,6 +22,8 @@ export interface IncomingMessage {
 export type ChannelRule =
   | { readonly mode: "all"; readonly ignoredUsernames: ReadonlySet<string> }
   | { readonly mode: "list"; readonly ids: ReadonlySet<string> };
+
+export type PollAction = "seed" | "skip" | "fetch";
 
 export function isWatched(channel: WatchedChannel, rule: ChannelRule): boolean {
   if (rule.mode === "list") return rule.ids.has(channel.id);
@@ -37,19 +42,39 @@ export function toOffer(message: IncomingMessage, channel: WatchedChannel): Offe
   return { text, channel: channel.username ?? channel.name, messageId: message.id, link };
 }
 
+export function pollAction(lastSeenId: number | undefined, topMessageId: number): PollAction {
+  if (lastSeenId === undefined) return "seed";
+  return topMessageId > lastSeenId ? "fetch" : "skip";
+}
+
+export interface TelegramSourceOptions {
+  readonly pollIntervalMs: number;
+}
+
 export class TelegramSource implements OfferSource {
+  private readonly lastSeenIds = new Map<string, number>();
+
   constructor(
     private readonly client: TelegramClient,
     private readonly selection: ChannelSelection,
     private readonly logger: Logger,
+    private readonly options: TelegramSourceOptions,
   ) {}
 
   async start(onOffer: OfferHandler): Promise<void> {
     const rule = await this.buildRule();
+    await this.poll(rule, onOffer);
+    this.logStartup(rule);
 
+    this.listenToPushedMessages(rule, onOffer);
+    void this.pollForever(rule, onOffer);
+  }
+
+  private listenToPushedMessages(rule: ChannelRule, onOffer: OfferHandler): void {
     this.client.addEventHandler(async (event: NewMessageEvent) => {
       try {
-        if (!(event.message.peerId instanceof Api.PeerChannel)) return;
+        const { id, peerId } = event.message;
+        if (!(peerId instanceof Api.PeerChannel)) return;
 
         const chat = await event.message.getChat();
         if (!(chat instanceof Api.Channel)) return;
@@ -57,35 +82,85 @@ export class TelegramSource implements OfferSource {
         const channel = toWatchedChannel(chat);
         if (!isWatched(channel, rule)) return;
 
-        const offer = toOffer(event.message, channel);
-        if (offer) await onOffer(offer);
+        this.markSeen(channel.id, id);
+        await this.handleMessage(event.message, channel, onOffer);
       } catch (error) {
         this.logger.error("Erro ao processar mensagem recebida", error);
       }
     }, new NewMessage({}));
   }
 
-  private async buildRule(): Promise<ChannelRule> {
-    if (this.selection.mode === "list") {
-      const channels = await this.resolveChannels(this.selection.names);
-      this.logger.info(`Monitorando ${channels.length} canal(is): ${channels.map((c) => c.title).join(", ")}`);
-      return { mode: "list", ids: new Set(channels.map((channel) => channel.id.toString())) };
+  private async pollForever(rule: ChannelRule, onOffer: OfferHandler): Promise<void> {
+    for (;;) {
+      await sleep(this.options.pollIntervalMs);
+      try {
+        await this.poll(rule, onOffer);
+      } catch (error) {
+        this.logger.error("Erro ao verificar os canais", error);
+      }
     }
-
-    const ignoredUsernames = new Set(this.selection.ignore.map((name) => name.toLowerCase()));
-    const followed = await this.followedChannels();
-    const watched = followed.filter((channel) => isWatched(toWatchedChannel(channel), { mode: "all", ignoredUsernames }));
-    this.logger.info(
-      `Monitorando todos os canais que você segue: ${watched.length} agora (${followed.length - watched.length} ignorado[s]). Canais novos entram automaticamente.`,
-    );
-    return { mode: "all", ignoredUsernames };
   }
 
-  private async followedChannels(): Promise<Api.Channel[]> {
+  private async poll(rule: ChannelRule, onOffer: OfferHandler): Promise<void> {
     const dialogs = await this.client.getDialogs({});
-    return dialogs
-      .map((dialog) => dialog.entity)
-      .filter((entity): entity is Api.Channel => entity instanceof Api.Channel && Boolean(entity.broadcast));
+
+    for (const dialog of dialogs) {
+      const { entity } = dialog;
+      if (!(entity instanceof Api.Channel)) continue;
+
+      const channel = toWatchedChannel(entity);
+      if (!isWatched(channel, rule)) continue;
+
+      const lastSeenId = this.lastSeenIds.get(channel.id);
+      const topMessageId = dialog.message?.id ?? 0;
+      const action = pollAction(lastSeenId, topMessageId);
+
+      if (action === "seed") {
+        this.lastSeenIds.set(channel.id, topMessageId);
+        continue;
+      }
+      if (action === "skip") continue;
+
+      const messages = await this.client.getMessages(entity, {
+        minId: lastSeenId,
+        limit: MAX_MESSAGES_PER_POLL,
+      });
+      const oldestFirst = [...messages].sort((a, b) => a.id - b.id);
+      for (const message of oldestFirst) {
+        await this.handleMessage(message, channel, onOffer);
+      }
+      this.markSeen(channel.id, topMessageId);
+    }
+  }
+
+  private async handleMessage(message: Api.Message, channel: WatchedChannel, onOffer: OfferHandler): Promise<void> {
+    const offer = toOffer(message, channel);
+    if (offer) await onOffer(offer);
+  }
+
+  private markSeen(channelId: string, messageId: number): void {
+    const current = this.lastSeenIds.get(channelId) ?? 0;
+    if (messageId > current) this.lastSeenIds.set(channelId, messageId);
+  }
+
+  private logStartup(rule: ChannelRule): void {
+    const seconds = this.options.pollIntervalMs / 1000;
+    const count = this.lastSeenIds.size;
+    if (rule.mode === "list") {
+      this.logger.info(`Monitorando ${count} canal(is) da lista, verificando a cada ${seconds}s`);
+    } else {
+      this.logger.info(
+        `Monitorando todos os canais que você segue: ${count} agora, verificando a cada ${seconds}s. Canais novos entram automaticamente.`,
+      );
+    }
+  }
+
+  private async buildRule(): Promise<ChannelRule> {
+    if (this.selection.mode === "all") {
+      return { mode: "all", ignoredUsernames: new Set(this.selection.ignore.map((name) => name.toLowerCase())) };
+    }
+    const channels = await this.resolveChannels(this.selection.names);
+    return { mode: "list", ids: new Set(channels.map((channel) => channel.id.toString())) };
   }
 
   private async resolveChannels(names: readonly string[]): Promise<Api.Channel[]> {

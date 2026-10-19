@@ -23,6 +23,14 @@ describe("matchesKeyword", () => {
     expect(matchesKeyword('Odyssey G5 27" (QHD), 165Hz!', odyssey)).toBe(true);
   });
 
+  it("ignora caracteres invisíveis que alguns canais colocam dentro das palavras", () => {
+    const ps5: Keyword = { terms: "ps5" };
+    expect(matchesKeyword("Console P⁠S5 Slim", ps5)).toBe(true);
+    expect(matchesKeyword("Console PS​5 Slim", ps5)).toBe(true);
+    expect(matchesKeyword("Console PS­5 Slim", ps5)).toBe(true);
+    expect(matchesKeyword("Ody⁠ssey G5 2⁠7", odyssey)).toBe(true);
+  });
+
   it("compara palavras inteiras, não pedaços", () => {
     // "27" não deve bater com "270" nem "2700"
     expect(matchesKeyword("Odyssey G5 270Hz", odyssey)).toBe(false);

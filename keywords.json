@@ -12,9 +12,9 @@
     { "terms": "macbook" },
     { "terms": "odyssey g5 27", "exclude": ["32", "oled"] },
     { "terms": "monitor qhd 27" },
-    { "terms": "cupom" },
+    { "terms": "monitor" },
+    { "terms": "tv" },
     { "terms": "frete gratis" },
-    { "terms": "amazon" },
-    { "terms": "mercado livre" }
+    { "terms": "amazon" }
   ]
 }

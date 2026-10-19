@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { isWatched, toOffer, type ChannelRule, type WatchedChannel } from "../src/infrastructure/telegram-source.js";
+import {
+  isWatched,
+  pollAction,
+  toOffer,
+  type ChannelRule,
+  type WatchedChannel,
+} from "../src/infrastructure/telegram-source.js";
 
 const publicChannel: WatchedChannel = { id: "1001", name: "Pelando", username: "pelando", broadcast: true };
 const privateChannel: WatchedChannel = { id: "2002", name: "Ofertas VIP", username: undefined, broadcast: true };
@@ -54,5 +60,20 @@ describe("isWatched", () => {
       expect(isWatched(group, rule)).toBe(true);
       expect(isWatched(privateChannel, rule)).toBe(false);
     });
+  });
+});
+
+describe("pollAction", () => {
+  it("canal visto pela primeira vez só registra a última mensagem, sem buscar histórico", () => {
+    expect(pollAction(undefined, 500)).toBe("seed");
+  });
+
+  it("busca quando há mensagem mais nova que a última vista", () => {
+    expect(pollAction(500, 503)).toBe("fetch");
+  });
+
+  it("não faz nada quando não há mensagem nova", () => {
+    expect(pollAction(503, 503)).toBe("skip");
+    expect(pollAction(503, 500)).toBe("skip");
   });
 });

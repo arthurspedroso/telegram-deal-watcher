@@ -26,7 +26,14 @@ describe("parseAppEnv", () => {
       session: "1BQANOTEuMTA4LjU2LjE1N...",
       botToken: "123456789:AAH-abc_def",
       notifyChatId: "987654321",
+      pollIntervalSeconds: 60,
     });
+  });
+
+  it("aceita POLL_INTERVAL_SECONDS e recusa valores abaixo de 20", () => {
+    expect(parseAppEnv({ ...validEnv, POLL_INTERVAL_SECONDS: "30" }).pollIntervalSeconds).toBe(30);
+    expect(() => parseAppEnv({ ...validEnv, POLL_INTERVAL_SECONDS: "5" })).toThrow(/mínimo de 20/);
+    expect(() => parseAppEnv({ ...validEnv, POLL_INTERVAL_SECONDS: "abc" })).toThrow(/POLL_INTERVAL_SECONDS/);
   });
 
   it("falha com ConfigError quando falta uma variável, dizendo qual", () => {

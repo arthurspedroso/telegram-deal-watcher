@@ -15,7 +15,11 @@ export interface AppEnv extends TelegramApiConfig {
   readonly session: string;
   readonly botToken: string;
   readonly notifyChatId: string;
+  readonly pollIntervalSeconds: number;
 }
+
+const DEFAULT_POLL_INTERVAL_SECONDS = 60;
+const MIN_POLL_INTERVAL_SECONDS = 20;
 
 export type ChannelSelection =
   | { readonly mode: "all"; readonly ignore: readonly string[] }
@@ -37,6 +41,14 @@ const appEnvSchema = telegramApiSchema.extend({
   TELEGRAM_SESSION: envVar().min(1, "vazio: rode `npm run login` para gerar a sessão"),
   BOT_TOKEN: envVar().regex(/^\d+:[\w-]+$/, "formato esperado: 123456789:ABC..."),
   NOTIFY_CHAT_ID: envVar().regex(/^-?\d+$/, "deve ser um número (o seu id no Telegram)"),
+  POLL_INTERVAL_SECONDS: z
+    .string()
+    .trim()
+    .regex(/^\d+$/, "deve ser um número de segundos")
+    .transform(Number)
+    .pipe(z.number().min(MIN_POLL_INTERVAL_SECONDS, `mínimo de ${MIN_POLL_INTERVAL_SECONDS} segundos`))
+    .optional()
+    .transform((value) => value ?? DEFAULT_POLL_INTERVAL_SECONDS),
 });
 
 const channelNameSchema = z
@@ -94,6 +106,7 @@ export function parseAppEnv(env: NodeJS.ProcessEnv): AppEnv {
     session: parsed.TELEGRAM_SESSION,
     botToken: parsed.BOT_TOKEN,
     notifyChatId: parsed.NOTIFY_CHAT_ID,
+    pollIntervalSeconds: parsed.POLL_INTERVAL_SECONDS,
   };
 }
 
