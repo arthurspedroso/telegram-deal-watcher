@@ -1,0 +1,20 @@
+{
+  "channels": "all",
+  "ignoreChannels": [],
+  "keywords": [
+    { "terms": "nintendo switch oled" },
+    { "terms": "nintendo switch 2", "exclude": ["oled", "lite"] },
+    { "terms": "nintendo switch2" },
+    { "terms": "ps5" },
+    { "terms": "playstation 5" },
+    { "terms": "book6" },
+    { "terms": "galaxy book 6" },
+    { "terms": "macbook" },
+    { "terms": "odyssey g5 27", "exclude": ["32", "oled"] },
+    { "terms": "monitor qhd 27" },
+    { "terms": "cupom" },
+    { "terms": "frete gratis" },
+    { "terms": "amazon" },
+    { "terms": "mercado livre" }
+  ]
+}
