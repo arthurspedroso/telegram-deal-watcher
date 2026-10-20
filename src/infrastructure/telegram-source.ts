@@ -16,7 +16,7 @@ export interface WatchedChannel {
 
 export interface IncomingMessage {
   readonly id: number;
-  readonly message: string;
+  readonly message?: string | undefined;
 }
 
 export type ChannelRule =
@@ -32,7 +32,7 @@ export function isWatched(channel: WatchedChannel, rule: ChannelRule): boolean {
 }
 
 export function toOffer(message: IncomingMessage, channel: WatchedChannel): Offer | undefined {
-  const text = message.message.trim();
+  const text = (message.message ?? "").trim();
   if (text.length === 0) return undefined;
 
   const link = channel.username
@@ -121,19 +121,34 @@ export class TelegramSource implements OfferSource {
       }
       if (action === "skip") continue;
 
-      const messages = await this.client.getMessages(entity, {
-        minId: lastSeenId,
-        limit: MAX_MESSAGES_PER_POLL,
-      });
-      const oldestFirst = [...messages].sort((a, b) => a.id - b.id);
-      for (const message of oldestFirst) {
-        await this.handleMessage(message, channel, onOffer);
+      try {
+        await this.fetchNewMessages(entity, channel, lastSeenId, onOffer);
+      } catch (error) {
+        this.logger.error(`Erro ao buscar mensagens de ${channel.name}`, error);
       }
       this.markSeen(channel.id, topMessageId);
     }
   }
 
-  private async handleMessage(message: Api.Message, channel: WatchedChannel, onOffer: OfferHandler): Promise<void> {
+  private async fetchNewMessages(
+    entity: Api.Channel,
+    channel: WatchedChannel,
+    lastSeenId: number | undefined,
+    onOffer: OfferHandler,
+  ): Promise<void> {
+    const messages = await this.client.getMessages(entity, { minId: lastSeenId, limit: MAX_MESSAGES_PER_POLL });
+    const posts = messages.filter((message) => message instanceof Api.Message).sort((a, b) => a.id - b.id);
+
+    for (const message of posts) {
+      try {
+        await this.handleMessage(message, channel, onOffer);
+      } catch (error) {
+        this.logger.error(`Erro ao processar a mensagem ${message.id} de ${channel.name}`, error);
+      }
+    }
+  }
+
+  private async handleMessage(message: IncomingMessage, channel: WatchedChannel, onOffer: OfferHandler): Promise<void> {
     const offer = toOffer(message, channel);
     if (offer) await onOffer(offer);
   }

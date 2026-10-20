@@ -31,6 +31,11 @@ describe("toOffer", () => {
   it("ignora mensagem sem texto (ex.: só imagem)", () => {
     expect(toOffer({ id: 1, message: "   " }, publicChannel)).toBeUndefined();
   });
+
+  it("ignora mensagem de serviço, que não tem o campo de texto", () => {
+    expect(toOffer({ id: 2 }, publicChannel)).toBeUndefined();
+    expect(toOffer({ id: 3, message: undefined }, publicChannel)).toBeUndefined();
+  });
 });
 
 describe("isWatched", () => {
